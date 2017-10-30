@@ -1,18 +1,19 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-using Microsoft.Extensions.Options;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Caching.Memory;
-using System.Text.Encodings.Web;
-using System.Threading.Tasks;
-using System.Net;
-using System.Net.Http;
-using System.Net.Http.Headers;
+﻿using Microsoft.AspNetCore.Http.Internal;
 using Microsoft.AspNetCore.Http;
-using System.Security.Claims;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using System.Collections.Generic;
+using System;
 using System.IO;
+using System.Net.Http.Headers;
+using System.Net.Http;
+using System.Net;
+using System.Security.Claims;
 using System.Security.Cryptography;
+using System.Text.Encodings.Web;
+using System.Text;
+using System.Threading.Tasks;
 
 namespace Microsoft.AspNetCore.Authentication.HmacAuthentication
 {
@@ -26,16 +27,29 @@ namespace Microsoft.AspNetCore.Authentication.HmacAuthentication
             _memoryCache = memoryCache;
         }
 
+        protected new HmacEvents Events
+        {
+            get { return (HmacEvents)base.Events; }
+            set { base.Events = value; }
+        }
+
+        protected override Task<object> CreateEventsAsync() => Task.FromResult<object>(new HmacEvents());
+
         protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
         {
             try
             {
-                string authorization = Request.Headers["authorization"];
+                HttpRequest req = Request;
+                // Enable rewind so the request body is available after the authentication
+                req.EnableRewind();
+                string authorization = req.Headers["authorization"];
                 if (string.IsNullOrEmpty(authorization))
                 {
                     return AuthenticateResult.NoResult();
                 }
-                bool valid = Validate(Request);
+                bool valid = Validate(req);
+                // Set the body position to 0 so the request body is available after the authentication
+                req.Body.Position = 0;
 
                 if (valid)
                 {
@@ -66,6 +80,12 @@ namespace Microsoft.AspNetCore.Authentication.HmacAuthentication
             {
                 eventContext.Error = "invalid_key";
                 eventContext.ErrorDescription = CreateErrorDescription(eventContext.AuthenticationFailure);
+            }
+
+            await Events.Challenge(eventContext);
+            if (eventContext.Handled)
+            {
+                return;
             }
 
             Response.StatusCode = 401;
